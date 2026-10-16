@@ -4,11 +4,35 @@ const FORMAL_STORAGE_KEY = "personal-finance-transactions";
 const TEST_STORAGE_KEY = "personal-finance-transactions-test";
 const isTestMode = new URLSearchParams(window.location.search).get("test") === "1";
 const STORAGE_KEY = isTestMode ? TEST_STORAGE_KEY : FORMAL_STORAGE_KEY;
+const FORMAL_EXPENSE_ITEMS_KEY = "personal-finance-expense-items";
+const TEST_EXPENSE_ITEMS_KEY = "personal-finance-expense-items-test";
+const EXPENSE_ITEMS_STORAGE_KEY = isTestMode ? TEST_EXPENSE_ITEMS_KEY : FORMAL_EXPENSE_ITEMS_KEY;
+const REQUIRED_CATEGORIES = new Set(["居住", "餐饮", "交通"]);
+const INCOME_CATEGORIES = new Set(["工资", "奖金"]);
+const PRESET_EXPENSE_ITEMS = {
+  "居住": [["residence-property", "物业费"], ["residence-water", "水费"], ["residence-electricity", "电费"], ["residence-gas", "燃气费"], ["residence-communications", "网络通信"], ["residence-other", "其他居住"]],
+  "餐饮": [["dining-breakfast", "早餐"], ["dining-lunch", "午餐"], ["dining-dinner", "晚餐"], ["dining-groceries", "食材采购"], ["dining-drinks", "饮品"], ["dining-other", "其他餐饮"]],
+  "交通": [["transport-bus", "公交"], ["transport-subway", "地铁"], ["transport-taxi", "打车"], ["transport-fuel", "燃油"], ["transport-parking", "停车"], ["transport-maintenance", "车辆维护"]],
+  "购物": [["shopping-clothing", "服饰"], ["shopping-home", "家居用品"], ["shopping-daily", "日用品"], ["shopping-digital", "数码产品"], ["shopping-other", "其他购物"]],
+  "娱乐": [["entertainment-movie", "电影"], ["entertainment-travel", "旅行"], ["entertainment-show", "演出"], ["entertainment-leisure", "休闲活动"], ["entertainment-other", "其他娱乐"]],
+  "医疗": [["medical-clinic", "门诊"], ["medical-exam", "检查"], ["medical-medicine", "药品"], ["medical-treatment", "治疗"], ["medical-hospital", "住院"], ["medical-other", "其他医疗"]],
+  "健康": [["health-fitness", "运动健身"], ["health-rehab", "康复训练"], ["health-management", "健康管理"], ["health-supplies", "健康用品"], ["health-other", "其他健康"]],
+  "其他": [["other-expense", "其他项目"]]
+};
+const PRESET_EXPENSE_ITEMS_BY_CATEGORY = Object.fromEntries(
+  Object.entries(PRESET_EXPENSE_ITEMS).map(([category, names]) => [
+    category,
+    names.map(([id, name]) => ({ id: `preset:${id}`, category, name }))
+  ])
+);
 
 let storageReadError = false;
 let storageErrorMessage = "";
 let storageKeyExists = false;
 let transactions = loadTransactions();
+let expenseItemsReadError = false;
+let expenseItemsErrorMessage = "";
+let customExpenseItems = loadExpenseItems();
 
 const transactionForm = document.querySelector("#transaction-form");
 const transactionList = document.querySelector("#transaction-list");
@@ -21,7 +45,24 @@ const savingsRateElement = document.querySelector("#savings-rate");
 const recordCountElement = document.querySelector("#record-count");
 const amountInput = document.querySelector("#amount");
 const categoryInput = document.querySelector("#category");
+const categoryPlaceholder = categoryInput.querySelector('option[value=""]');
+const incomeCategoryGroup = categoryInput.querySelector('[data-category-type="income"]');
+const expenseCategoryGroup = categoryInput.querySelector('[data-category-type="expense"]');
 const categoryShortcuts = document.querySelector("#category-shortcuts");
+const spendingAttribute = document.querySelector("#spending-attribute");
+const legacyCategoryOptions = document.querySelector("#legacy-category-options");
+const expenseItemControl = document.querySelector("#expense-item-control");
+const expenseItemInput = document.querySelector("#expense-item");
+const expenseItemError = document.querySelector("#expense-item-error");
+const addExpenseItemButton = document.querySelector("#add-expense-item-button");
+const manageExpenseItemsButton = document.querySelector("#manage-expense-items-button");
+const expenseItemManagement = document.querySelector("#expense-item-management");
+const customExpenseItemList = document.querySelector("#custom-expense-item-list");
+const customExpenseItemForm = document.querySelector("#custom-expense-item-form");
+const customExpenseItemNameInput = document.querySelector("#custom-expense-item-name");
+const customExpenseItemError = document.querySelector("#custom-expense-item-error");
+const saveCustomExpenseItemButton = document.querySelector("#save-custom-expense-item-button");
+const cancelCustomExpenseItemButton = document.querySelector("#cancel-custom-expense-item-button");
 const transactionDateInput = document.querySelector("#transaction-date");
 const noteInput = document.querySelector("#note");
 const amountError = document.querySelector("#amount-error");
@@ -39,39 +80,61 @@ const backupFileInput = document.querySelector("#backup-file-input");
 const dataMessage = document.querySelector("#data-message");
 const importPreview = document.querySelector("#import-preview");
 const previewDetails = document.querySelector("#preview-details");
+const restoreScopeWarning = document.querySelector("#restore-scope-warning");
 const cancelImportButton = document.querySelector("#cancel-import-button");
 const confirmImportButton = document.querySelector("#confirm-import-button");
 const trendChart = document.querySelector("#trend-chart");
 const rangeControls = document.querySelector("#range-controls");
 const monthlySummaryElement = document.querySelector("#monthly-summary");
 const categoryExpensesElement = document.querySelector("#category-expenses");
+const categoryPeriodInput = document.querySelector("#category-period");
+const categoryExpenseSummaryElement = document.querySelector("#category-expense-summary");
+const historyRangeControls = document.querySelector(".history-range-controls");
+const historyMonthInput = document.querySelector("#history-month");
+const historySummaryElement = document.querySelector("#history-summary");
 const financialInsightsElement = document.querySelector("#financial-insights");
 const quickAddButton = document.querySelector("#quick-add-button");
 const entryPanel = document.querySelector("#entry-panel");
 
 let editingTransactionId = null;
 let isSubmitting = false;
-let pendingImport = null;
 let selectedTrendRange = "30d";
+let lastExpenseCategory = "";
+let selectedCategoryPeriod = "month";
+let categoryDrilldown = { level: 0, attribute: "", category: "" };
+let selectedHistoryFilter = { type: "month", month: getMonthKey(new Date()) };
 
 transactionForm.addEventListener("submit", handleFormSubmit);
 transactionList.addEventListener("click", handleTransactionListClick);
 cancelEditButton.addEventListener("click", cancelEditing);
 exportButton.addEventListener("click", exportTransactions);
-importButton.addEventListener("click", () => backupFileInput.click());
-backupFileInput.addEventListener("change", handleBackupFileSelection);
-cancelImportButton.addEventListener("click", hideImportPreview);
-confirmImportButton.addEventListener("click", restoreTransactions);
+// ISOLATED TEST: disabled unvalidated STEP 2D: importButton.addEventListener("click", () => backupFileInput.click());
+// ISOLATED TEST: disabled unvalidated STEP 2D: backupFileInput.addEventListener("change", handleBackupFileSelection);
+
+// ISOLATED TEST: disabled unvalidated STEP 2D: confirmImportButton.addEventListener("click", restoreTransactions);
 rangeControls.addEventListener("click", handleRangeChange);
+categoryPeriodInput.addEventListener("change", handleCategoryPeriodChange);
+categoryExpensesElement.addEventListener("click", handleCategoryDrilldownClick);
+historyRangeControls.addEventListener("click", handleHistoryRangeChange);
+historyMonthInput.addEventListener("change", handleHistoryMonthChange);
 quickAddButton.addEventListener("click", focusEntryForm);
 categoryShortcuts.addEventListener("click", handleCategoryShortcutClick);
 categoryInput.addEventListener("change", syncCategoryShortcuts);
+categoryInput.addEventListener("change", handleCategoryChange);
+transactionForm.addEventListener("change", handleTransactionFormChange);
+addExpenseItemButton.addEventListener("click", showCustomExpenseItemForm);
+manageExpenseItemsButton.addEventListener("click", toggleExpenseItemManagement);
+customExpenseItemList.addEventListener("click", handleExpenseItemManagementClick);
+saveCustomExpenseItemButton.addEventListener("click", saveCustomExpenseItem);
+cancelCustomExpenseItemButton.addEventListener("click", hideCustomExpenseItemForm);
 
 renderPage();
 updateFormMode();
 updateEnvironmentStatus();
 syncCategoryShortcuts();
+syncCategoryControls();
 transactionDateInput.value = getLocalDateValue();
+historyMonthInput.value = selectedHistoryFilter.month;
 
 if (storageReadError) {
   showFormMessage(storageErrorMessage, true);
@@ -89,14 +152,383 @@ function handleCategoryShortcutClick(event) {
     return;
   }
 
+  if (getSelectedTransactionType() !== "expense") {
+    transactionForm.elements.type.value = "expense";
+    expenseItemInput.value = "";
+    syncCategoryControls({ clearCategory: true });
+  }
   categoryInput.value = shortcut.dataset.category;
-  syncCategoryShortcuts();
+  categoryError.textContent = "";
+  syncCategoryControls();
 }
 
 function syncCategoryShortcuts() {
+  const isExpense = getSelectedTransactionType() === "expense";
+  categoryShortcuts.hidden = !isExpense;
   categoryShortcuts.querySelectorAll("[data-category]").forEach((shortcut) => {
-    shortcut.classList.toggle("active", shortcut.dataset.category === categoryInput.value);
+    shortcut.classList.toggle("active", isExpense && shortcut.dataset.category === categoryInput.value);
   });
+}
+
+function getSelectedTransactionType() {
+  return transactionForm.elements.type.value;
+}
+
+function isExpenseCategory(category) {
+  return !INCOME_CATEGORIES.has(category) && (
+    Object.prototype.hasOwnProperty.call(PRESET_EXPENSE_ITEMS_BY_CATEGORY, category) ||
+    Array.from(legacyCategoryOptions.children).some((option) => option.value === category)
+  );
+}
+
+function isCategoryValidForType(type, category) {
+  return type === "income"
+    ? INCOME_CATEGORIES.has(category)
+    : type === "expense" && isExpenseCategory(category);
+}
+
+function getExpenseCategoryAttribute(category) {
+  return REQUIRED_CATEGORIES.has(category) ? "刚需" : "弹性";
+}
+
+function getExpenseItems(category) {
+  const presetItems = PRESET_EXPENSE_ITEMS_BY_CATEGORY[category] || [
+    { id: `preset:category-other:${encodeURIComponent(category)}`, category, name: "其他项目" }
+  ];
+
+  return [
+    ...presetItems,
+    ...customExpenseItems.filter((item) => item.category === category)
+  ];
+}
+
+function makeOption(value, label) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function ensureLegacyCategoryOption(category) {
+  if (!category || INCOME_CATEGORIES.has(category) || isExpenseCategory(category)) {
+    return;
+  }
+
+  const option = makeOption(category, category);
+  option.dataset.legacy = "true";
+  legacyCategoryOptions.append(option);
+  legacyCategoryOptions.hidden = false;
+}
+
+function syncCategoryControls({ preserveExpenseItem = false, clearCategory = false } = {}) {
+  const type = getSelectedTransactionType();
+  const isExpense = type === "expense";
+  const category = clearCategory ? "" : categoryInput.value;
+  const categoryChanged = Boolean(lastExpenseCategory && category && category !== lastExpenseCategory);
+
+  if (clearCategory) {
+    categoryInput.value = "";
+  }
+
+  if (categoryChanged && !preserveExpenseItem) {
+    expenseItemInput.value = "";
+    expenseItemError.classList.remove("success");
+    expenseItemError.textContent = "";
+  }
+
+  categoryInput.replaceChildren(categoryPlaceholder);
+  const activeCategoryGroup = isExpense ? expenseCategoryGroup : incomeCategoryGroup;
+  activeCategoryGroup.hidden = false;
+  categoryInput.append(activeCategoryGroup);
+  legacyCategoryOptions.hidden = !isExpense || legacyCategoryOptions.children.length === 0;
+  if (isExpense && legacyCategoryOptions.children.length > 0) {
+    categoryInput.append(legacyCategoryOptions);
+  }
+  categoryInput.value = category;
+  categoryShortcuts.hidden = !isExpense;
+  spendingAttribute.hidden = !isExpense || !category;
+  spendingAttribute.textContent = isExpense && category
+    ? `消费属性：${getExpenseCategoryAttribute(category)}`
+    : "";
+  expenseItemControl.hidden = !isExpense || !category;
+
+  const selectedItemId = expenseItemInput.value;
+  expenseItemInput.replaceChildren(makeOption("", "请选择项目"));
+
+  if (isExpense && category) {
+    for (const item of getExpenseItems(category)) {
+      expenseItemInput.append(makeOption(item.id, item.name));
+    }
+
+    if (selectedItemId && !getExpenseItems(category).some((item) => item.id === selectedItemId)) {
+      expenseItemInput.append(makeOption(selectedItemId, "项目无法识别"));
+    }
+  }
+
+  expenseItemInput.value = selectedItemId;
+  expenseItemInput.disabled = expenseItemsReadError;
+  addExpenseItemButton.disabled = expenseItemsReadError;
+  manageExpenseItemsButton.disabled = expenseItemsReadError;
+  if (expenseItemsReadError) {
+    expenseItemError.textContent = expenseItemsErrorMessage;
+  }
+
+  lastExpenseCategory = isExpense ? category : "";
+  renderExpenseItemManagement();
+  syncCategoryShortcuts();
+}
+
+function renderExpenseItemManagement() {
+  const category = categoryInput.value;
+  customExpenseItemList.replaceChildren();
+  const items = customExpenseItems.filter((item) => item.category === category);
+
+  if (items.length === 0) {
+    const emptyItem = document.createElement("li");
+    emptyItem.textContent = "当前分类暂无自定义项目。";
+    customExpenseItemList.append(emptyItem);
+    return;
+  }
+
+  for (const item of items) {
+    const row = document.createElement("li");
+    row.className = "custom-expense-item-row";
+    const name = document.createElement("span");
+    name.textContent = item.name;
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.dataset.deleteExpenseItem = item.id;
+    removeButton.textContent = "删除";
+    row.append(name, removeButton);
+    customExpenseItemList.append(row);
+  }
+}
+
+function toggleExpenseItemManagement() {
+  const isOpening = expenseItemManagement.hidden;
+  expenseItemManagement.hidden = !isOpening;
+  manageExpenseItemsButton.setAttribute("aria-expanded", String(isOpening));
+  if (isOpening) {
+    renderExpenseItemManagement();
+  }
+}
+
+function handleExpenseItemManagementClick(event) {
+  const removeButton = event.target.closest("[data-delete-expense-item]");
+  if (!removeButton) {
+    return;
+  }
+
+  deleteCustomExpenseItem(removeButton.dataset.deleteExpenseItem);
+}
+
+function inspectCustomExpenseItemDeletion(itemId, category, transactionSnapshot, directorySnapshot) {
+  if (!transactionSnapshot || !transactionSnapshot.ok || !Array.isArray(transactionSnapshot.transactions)) {
+    return { ok: false, reason: "交易数据读取失败或格式异常，无法确认项目引用，禁止删除。" };
+  }
+
+  if (!directorySnapshot || !directorySnapshot.ok || !Array.isArray(directorySnapshot.items)) {
+    return { ok: false, reason: "项目目录读取失败或格式异常，禁止删除。" };
+  }
+
+  const directoryValidation = validateExpenseItemsData({ version: 1, items: directorySnapshot.items });
+  if (!directoryValidation.ok || JSON.stringify(directorySnapshot.items) !== JSON.stringify(customExpenseItems)) {
+    return { ok: false, reason: "项目目录不一致或数据损坏，禁止删除。" };
+  }
+
+  if (typeof itemId !== "string" || !itemId.startsWith("custom:")) {
+    return { ok: false, reason: "系统预设项目不可删除。" };
+  }
+
+  const matches = directorySnapshot.items.filter((item) => item.id === itemId);
+  if (matches.length !== 1 || matches[0].category !== category) {
+    return { ok: false, reason: "项目不存在、ID 不唯一或不属于当前分类，禁止删除。" };
+  }
+
+  for (const transaction of transactionSnapshot.transactions) {
+    if (!isValidStoredTransaction(transaction)) {
+      return { ok: false, reason: "交易数据异常，无法确认项目引用，禁止删除。" };
+    }
+
+    if (Object.prototype.hasOwnProperty.call(transaction, "expenseItemId") &&
+      (typeof transaction.expenseItemId !== "string" || transaction.expenseItemId.length === 0)) {
+      return { ok: false, reason: "交易项目引用字段异常，无法确认引用关系，禁止删除。" };
+    }
+
+    if (transaction.expenseItemId === itemId) {
+      return { ok: false, reason: "该项目已被交易引用，禁止删除。" };
+    }
+  }
+
+  return { ok: true, item: matches[0] };
+}
+
+function deleteCustomExpenseItem(itemId) {
+  if (storageReadError || expenseItemsReadError) {
+    expenseItemError.textContent = storageReadError
+      ? storageErrorMessage
+      : expenseItemsErrorMessage;
+    return false;
+  }
+
+  const initialTransactions = readStoredTransactions();
+  const initialDirectory = readStoredExpenseItems();
+  const initialCheck = inspectCustomExpenseItemDeletion(
+    itemId,
+    categoryInput.value,
+    initialTransactions,
+    initialDirectory
+  );
+  if (!initialCheck.ok) {
+    expenseItemError.textContent = initialCheck.reason;
+    return false;
+  }
+
+  if (!window.confirm(`确认删除自定义项目“${initialCheck.item.name}”吗？此操作不可撤销。`)) {
+    return false;
+  }
+
+  const confirmedTransactions = readStoredTransactions();
+  const confirmedDirectory = readStoredExpenseItems();
+  const confirmedCheck = inspectCustomExpenseItemDeletion(
+    itemId,
+    categoryInput.value,
+    confirmedTransactions,
+    confirmedDirectory
+  );
+  if (!confirmedCheck.ok) {
+    expenseItemError.textContent = confirmedCheck.reason;
+    return false;
+  }
+
+  const nextItems = confirmedDirectory.items.filter((item) => item.id !== itemId);
+  const result = saveExpenseItems(nextItems);
+  if (!result.ok) {
+    expenseItemError.textContent = result.message;
+    return false;
+  }
+
+  customExpenseItems = result.items;
+  if (expenseItemInput.value === itemId) {
+    expenseItemInput.value = "";
+  }
+  syncCategoryControls({ preserveExpenseItem: true });
+  expenseItemError.classList.add("success");
+  expenseItemError.textContent = "自定义项目已删除。";
+  return true;
+}
+
+function handleCategoryChange() {
+  categoryError.textContent = "";
+  syncCategoryControls();
+}
+
+function handleTransactionFormChange(event) {
+  if (event.target.matches('input[name="type"]')) {
+    expenseItemInput.value = "";
+    categoryError.textContent = "";
+    expenseItemError.textContent = "";
+    expenseItemError.classList.remove("success");
+    syncCategoryControls({ clearCategory: true });
+  }
+}
+
+function showCustomExpenseItemForm() {
+  if (expenseItemsReadError) {
+    expenseItemError.textContent = expenseItemsErrorMessage;
+    return;
+  }
+
+  customExpenseItemError.textContent = "";
+  customExpenseItemNameInput.value = "";
+  customExpenseItemForm.hidden = false;
+  customExpenseItemNameInput.focus();
+}
+
+function hideCustomExpenseItemForm() {
+  customExpenseItemForm.hidden = true;
+  customExpenseItemError.textContent = "";
+  customExpenseItemNameInput.value = "";
+}
+
+function normalizeExpenseItemName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function validateCustomExpenseItemName(name, category) {
+  if (!name || name.length > 30 || /[\u0000-\u001f<>]/.test(name)) {
+    return "项目名称须为 1 至 30 个字符，且不能包含控制符或尖括号。";
+  }
+
+  const normalizedName = name.toLocaleLowerCase("zh-CN");
+  if (getExpenseItems(category).some((item) => item.name.toLocaleLowerCase("zh-CN") === normalizedName)) {
+    return "该大类下已有同名项目。";
+  }
+
+  return "";
+}
+
+function createExpenseItemId() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") {
+    return `custom:${window.crypto.randomUUID()}`;
+  }
+
+  let id;
+  do {
+    id = `custom:${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  } while (customExpenseItems.some((item) => item.id === id));
+  return id;
+}
+
+function saveCustomExpenseItem() {
+  expenseItemError.classList.remove("success");
+
+  if (expenseItemsReadError) {
+    customExpenseItemError.textContent = expenseItemsErrorMessage;
+    return;
+  }
+
+  const category = categoryInput.value;
+  const name = normalizeExpenseItemName(customExpenseItemNameInput.value);
+  const validationMessage = validateCustomExpenseItemName(name, category);
+
+  if (!isExpenseCategory(category) || !name) {
+    customExpenseItemError.textContent = "请选择有效的支出大类并填写项目名称。";
+    return;
+  }
+
+  if (validationMessage) {
+    customExpenseItemError.textContent = validationMessage;
+    return;
+  }
+
+  const newItem = { id: createExpenseItemId(), category, name };
+  const nextItems = [...customExpenseItems, newItem];
+  const result = saveExpenseItems(nextItems);
+
+  if (!result.ok) {
+    customExpenseItemError.textContent = result.message;
+    return;
+  }
+
+  customExpenseItems = result.items;
+  syncCategoryControls({ preserveExpenseItem: true });
+  expenseItemInput.value = newItem.id;
+  customExpenseItemForm.hidden = true;
+  customExpenseItemNameInput.value = "";
+  expenseItemError.classList.add("success");
+  expenseItemError.textContent = "自定义项目已保存并可选择。";
+}
+
+function resolveExpenseItem(category, expenseItemId) {
+  if (!expenseItemId) {
+    return { name: "历史未分类", recognized: true };
+  }
+
+  const item = getExpenseItems(category).find((candidate) => candidate.id === expenseItemId);
+  return item
+    ? { name: item.name, recognized: true }
+    : { name: "项目无法识别", recognized: false };
 }
 
 function getLocalDateValue(date = new Date()) {
@@ -140,10 +572,27 @@ function handleFormSubmit(event) {
     const category = String(formData.get("category") || "").trim();
     const note = String(formData.get("note") || "").trim();
     const transactionDate = String(formData.get("transactionDate") || "").trim();
+    const expenseItemId = String(formData.get("expenseItemId") || "").trim();
     const editingTransaction = editingTransactionId === null
       ? null
       : transactions.find((transaction) => transaction.id === editingTransactionId);
     const mayKeepMissingLegacyDate = Boolean(editingTransaction && !getTransactionDateValue(editingTransaction) && !transactionDate);
+    const mayKeepLegacyExpenseItem = Boolean(
+      editingTransaction &&
+      editingTransaction.type === "expense" &&
+      type === "expense" &&
+      editingTransaction.category === category &&
+      !editingTransaction.expenseItemId &&
+      !expenseItemId
+    );
+    const mayKeepUnrecognizedExpenseItem = Boolean(
+      editingTransaction &&
+      editingTransaction.type === "expense" &&
+      type === "expense" &&
+      editingTransaction.category === category &&
+      editingTransaction.expenseItemId &&
+      editingTransaction.expenseItemId === expenseItemId
+    );
 
     let isValid = true;
 
@@ -156,9 +605,27 @@ function handleFormSubmit(event) {
       isValid = false;
     }
 
-    if (!category) {
-      categoryError.textContent = "请选择一个分类。";
+    if (!isCategoryValidForType(type, category)) {
+      categoryError.textContent = type === "income"
+        ? "请选择有效的收入分类（工资或奖金）。"
+        : "请选择有效的支出大类。";
       isValid = false;
+    }
+
+    if (type === "income" && expenseItemId) {
+      expenseItemError.textContent = "收入交易不能关联支出项目，请先清除项目选择。";
+      isValid = false;
+    }
+
+    if (type === "expense" && expenseItemsReadError && !mayKeepLegacyExpenseItem) {
+      expenseItemError.textContent = expenseItemsErrorMessage;
+      isValid = false;
+    } else if (type === "expense" && !mayKeepLegacyExpenseItem && !mayKeepUnrecognizedExpenseItem) {
+      const selectedItem = getExpenseItems(category).find((item) => item.id === expenseItemId);
+      if (!selectedItem) {
+        expenseItemError.textContent = "请为这笔支出选择当前大类下的有效项目。";
+        isValid = false;
+      }
     }
 
     if (!isValidDateValue(transactionDate) && !mayKeepMissingLegacyDate) {
@@ -184,7 +651,8 @@ function handleFormSubmit(event) {
           category,
           note,
           createdAt: new Date().toISOString(),
-          transactionDate
+          transactionDate,
+          ...(type === "expense" ? { expenseItemId } : {})
         }
       ];
     } else {
@@ -210,6 +678,12 @@ function handleFormSubmit(event) {
           category,
           note
         };
+
+        if (type === "income") {
+          delete updatedTransaction.expenseItemId;
+        } else if (!mayKeepLegacyExpenseItem && !mayKeepUnrecognizedExpenseItem) {
+          updatedTransaction.expenseItemId = expenseItemId;
+        }
 
         if (isValidDateValue(transactionDate)) {
           updatedTransaction.transactionDate = transactionDate;
@@ -289,12 +763,33 @@ function startEditing(transactionId) {
   editingTransactionId = transaction.id;
   transactionForm.elements.type.value = transaction.type;
   amountInput.value = (transaction.amountInCents / 100).toFixed(2);
-  categoryInput.value = transaction.category;
+  categoryInput.value = "";
+  expenseItemInput.value = "";
+  if (transaction.type === "expense") {
+    ensureLegacyCategoryOption(transaction.category);
+  }
   transactionDateInput.value = getTransactionDateValue(transaction) || "";
   noteInput.value = transaction.note;
   clearValidationMessages();
   updateFormMode();
-  syncCategoryShortcuts();
+  syncCategoryControls();
+
+  if (isCategoryValidForType(transaction.type, transaction.category)) {
+    categoryInput.value = transaction.category;
+    syncCategoryControls();
+  } else {
+    categoryError.textContent = "该历史记录的交易类型与分类不匹配，请主动选择有效分类后再保存。";
+  }
+
+  if (transaction.type === "expense" && categoryInput.value === transaction.category) {
+    if (transaction.expenseItemId && !Array.from(expenseItemInput.options).some((option) => option.value === transaction.expenseItemId)) {
+      expenseItemInput.append(makeOption(transaction.expenseItemId, "项目无法识别"));
+    }
+    expenseItemInput.value = transaction.expenseItemId || "";
+    if (!transaction.expenseItemId) {
+      expenseItemInput.options[0].textContent = "历史未分类（编辑其他字段时保持不变）";
+    }
+  }
   amountInput.focus();
 }
 
@@ -304,7 +799,8 @@ function cancelEditing() {
   clearValidationMessages();
   updateFormMode();
   transactionDateInput.value = getLocalDateValue();
-  syncCategoryShortcuts();
+  lastExpenseCategory = "";
+  syncCategoryControls();
 }
 
 function updateFormMode() {
@@ -376,25 +872,122 @@ function handleRangeChange(event) {
   renderAnalytics();
 }
 
+function handleCategoryPeriodChange() {
+  selectedCategoryPeriod = categoryPeriodInput.value;
+  categoryDrilldown = { level: 0, attribute: "", category: "" };
+  renderAnalytics();
+}
+
+function handleCategoryDrilldownClick(event) {
+  const backButton = event.target.closest("[data-category-back]");
+  if (backButton) {
+    categoryDrilldown = categoryDrilldown.level === 2
+      ? { level: 1, attribute: categoryDrilldown.attribute, category: "" }
+      : { level: 0, attribute: "", category: "" };
+    renderAnalytics();
+    return;
+  }
+
+  const attributeButton = event.target.closest("[data-category-attribute]");
+  if (attributeButton) {
+    categoryDrilldown = { level: 1, attribute: attributeButton.dataset.categoryAttribute, category: "" };
+    renderAnalytics();
+    return;
+  }
+
+  const categoryButton = event.target.closest("[data-category-drill-category]");
+  if (categoryButton) {
+    categoryDrilldown = {
+      level: 2,
+      attribute: categoryDrilldown.attribute,
+      category: categoryButton.dataset.categoryDrillCategory
+    };
+    renderAnalytics();
+  }
+}
+
+function handleHistoryRangeChange(event) {
+  const button = event.target.closest("[data-history-range]");
+  if (!button) {
+    return;
+  }
+
+  selectedHistoryFilter = {
+    type: button.dataset.historyRange,
+    month: getMonthKey(new Date())
+  };
+  historyMonthInput.value = "";
+  historyRangeControls.querySelectorAll("[data-history-range]").forEach((candidate) => {
+    candidate.classList.toggle("active", candidate === button);
+  });
+  renderTransactions();
+}
+
+function handleHistoryMonthChange() {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(historyMonthInput.value)) {
+    return;
+  }
+
+  selectedHistoryFilter = { type: "specific-month", month: historyMonthInput.value };
+  historyRangeControls.querySelectorAll("[data-history-range]").forEach((button) => {
+    button.classList.remove("active");
+  });
+  renderTransactions();
+}
+
 function renderAnalytics() {
   try {
     renderTrendChart(calculateTrendData(transactions, selectedTrendRange));
     renderMonthlySummary(calculateMonthlySummary(transactions));
-    renderCategoryExpenses(calculateCategoryExpenses(transactions));
+    renderCategoryExpenses(calculateExpenseStructure(
+      filterTransactionsByCategoryPeriod(transactions, selectedCategoryPeriod)
+    ));
     renderFinancialInsights(calculateAnomalies(transactions));
   } catch (error) {
     const message = "统计暂时无法计算，请稍后重试。";
     trendChart.innerHTML = `<p class="trend-empty">${message}</p>`;
     monthlySummaryElement.innerHTML = `<p class="trend-empty">${message}</p>`;
     categoryExpensesElement.innerHTML = `<p class="category-empty">${message}</p>`;
+    categoryExpenseSummaryElement.textContent = message;
     financialInsightsElement.innerHTML = `<p class="insight-empty">${message}</p>`;
   }
 }
 
 function renderTransactions() {
-  const sortedTransactions = [...transactions].sort(
-    (first, second) => new Date(second.createdAt) - new Date(first.createdAt)
-  );
+  const filteredTransactions = filterTransactionsByHistoryPeriod(transactions, selectedHistoryFilter);
+  renderHistorySummary(filteredTransactions);
+  const sortedTransactions = filteredTransactions
+    .map((transaction, index) => ({ transaction, index }))
+    .sort((first, second) => {
+      const firstDate = getTransactionDateValue(first.transaction);
+      const secondDate = getTransactionDateValue(second.transaction);
+
+      if (firstDate !== secondDate) {
+        if (!firstDate) return 1;
+        if (!secondDate) return -1;
+        return secondDate.localeCompare(firstDate);
+      }
+
+      if (!firstDate) {
+        return first.index - second.index;
+      }
+
+      const firstCreatedAt = Date.parse(first.transaction.createdAt);
+      const secondCreatedAt = Date.parse(second.transaction.createdAt);
+      const firstHasValidCreatedAt = Number.isFinite(firstCreatedAt);
+      const secondHasValidCreatedAt = Number.isFinite(secondCreatedAt);
+
+      if (firstHasValidCreatedAt !== secondHasValidCreatedAt) {
+        return firstHasValidCreatedAt ? -1 : 1;
+      }
+
+      if (firstHasValidCreatedAt && firstCreatedAt !== secondCreatedAt) {
+        return secondCreatedAt - firstCreatedAt;
+      }
+
+      return first.index - second.index;
+    })
+    .map(({ transaction }) => transaction);
 
   recordCountElement.textContent = `${sortedTransactions.length} 笔`;
 
@@ -412,11 +1005,18 @@ function createTransactionMarkup(transaction) {
   const sign = isIncome ? "+" : "-";
   const note = transaction.note || "无备注";
   const dateLabel = formatExpenseDate(getTransactionDateValue(transaction));
+  const displayCategory = transaction.category === "物业水电" ? "居住" : transaction.category;
+  const expenseItem = isIncome
+    ? null
+    : resolveExpenseItem(transaction.category, transaction.expenseItemId);
+  const categoryLabel = isIncome
+    ? displayCategory
+    : `${displayCategory} / ${expenseItem.name}`;
 
   return `
     <article class="transaction-item ${typeClass}">
       <div class="transaction-main">
-        <p class="transaction-category">${escapeHtml(transaction.category)}</p>
+        <p class="transaction-category">${escapeHtml(categoryLabel)}</p>
         <p class="transaction-note">${escapeHtml(note)}</p>
       </div>
       <p class="transaction-amount ${typeClass}">${sign} ${formatCurrency(transaction.amountInCents)}</p>
@@ -525,6 +1125,74 @@ function addDays(date, days) {
 
 function addMonths(date, months) {
   return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
+function shiftMonthKey(monthKey, offset) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return getMonthKey(new Date(year, month - 1 + offset, 1));
+}
+
+function getCategoryPeriodMonthRange(period, now = new Date()) {
+  const currentMonth = getMonthKey(now);
+  if (period === "all") {
+    return null;
+  }
+
+  if (period === "previous-month") {
+    return { start: shiftMonthKey(currentMonth, -1), end: currentMonth };
+  }
+
+  if (period === "three-months") {
+    return { start: shiftMonthKey(currentMonth, -2), end: shiftMonthKey(currentMonth, 1) };
+  }
+
+  if (period === "year") {
+    return { start: `${now.getFullYear()}-01`, end: `${now.getFullYear() + 1}-01` };
+  }
+
+  return { start: currentMonth, end: shiftMonthKey(currentMonth, 1) };
+}
+
+function filterTransactionsByCategoryPeriod(transactionList, period, now = new Date()) {
+  const range = getCategoryPeriodMonthRange(period, now);
+  if (!range) {
+    return transactionList.slice();
+  }
+
+  return transactionList.filter((transaction) => {
+    const dateValue = getTransactionDateValue(transaction);
+    if (!dateValue) {
+      return false;
+    }
+
+    const month = dateValue.slice(0, 7);
+    return month >= range.start && month < range.end;
+  });
+}
+
+function getHistoryMonth(filter, now = new Date()) {
+  if (filter.type === "all") {
+    return null;
+  }
+  if (filter.type === "previous-month") {
+    return shiftMonthKey(getMonthKey(now), -1);
+  }
+  if (filter.type === "specific-month" && /^\d{4}-(0[1-9]|1[0-2])$/.test(filter.month)) {
+    return filter.month;
+  }
+  return getMonthKey(now);
+}
+
+function filterTransactionsByHistoryPeriod(transactionList, filter, now = new Date()) {
+  if (filter.type === "all") {
+    return transactionList.slice();
+  }
+
+  const month = getHistoryMonth(filter, now);
+  return transactionList.filter((transaction) => {
+    const dateValue = getTransactionDateValue(transaction);
+    return Boolean(dateValue && dateValue.slice(0, 7) === month);
+  });
 }
 
 function filterTransactionsByRange(transactionList, range) {
@@ -650,32 +1318,90 @@ function calculateMoM(currentValue, previousValue) {
   return { type: "percentage", value: ((currentValue - previousValue) / previousValue) * 100 };
 }
 
-function calculateCategoryExpenses(transactionList) {
-  const totals = new Map();
-  const totalExpense = calculateTotalExpense(transactionList);
+function getExpenseDisplayCategory(category) {
+  const normalized = typeof category === "string" ? category.trim() : "";
+  if (!normalized) {
+    return "未分类";
+  }
+  return normalized === "物业水电" ? "居住" : normalized;
+}
+
+function getExpenseItemDisplayName(transaction, displayCategory) {
+  if (!transaction.expenseItemId) {
+    return "历史未分类";
+  }
+
+  const items = [
+    ...Object.values(PRESET_EXPENSE_ITEMS_BY_CATEGORY).flat(),
+    ...customExpenseItems
+  ];
+  const item = items.find((candidate) =>
+    candidate.id === transaction.expenseItemId &&
+    (candidate.category === transaction.category || candidate.category === displayCategory)
+  );
+  return item ? item.name : "项目无法识别";
+}
+
+function calculateExpenseStructure(transactionList) {
+  const attributes = new Map();
+  let totalExpenseInCents = 0;
+  let totalCount = 0;
 
   for (const transaction of transactionList) {
     if (transaction.type !== "expense") {
       continue;
     }
 
-    const category = typeof transaction.category === "string" && transaction.category.trim()
-      ? transaction.category.trim()
-      : "未分类";
-    totals.set(category, (totals.get(category) || 0) + transaction.amountInCents);
+    const category = getExpenseDisplayCategory(transaction.category);
+    const attribute = REQUIRED_CATEGORIES.has(category) ? "刚需" : "弹性";
+    const attributeNode = attributes.get(attribute) || {
+      name: attribute,
+      amountInCents: 0,
+      count: 0,
+      categories: new Map()
+    };
+    const categoryNode = attributeNode.categories.get(category) || {
+      name: category,
+      amountInCents: 0,
+      count: 0,
+      items: new Map()
+    };
+    const itemName = getExpenseItemDisplayName(transaction, category);
+    const itemNode = categoryNode.items.get(itemName) || {
+      name: itemName,
+      amountInCents: 0,
+      count: 0
+    };
+
+    itemNode.amountInCents += transaction.amountInCents;
+    itemNode.count += 1;
+    categoryNode.items.set(itemName, itemNode);
+    categoryNode.amountInCents += transaction.amountInCents;
+    categoryNode.count += 1;
+    attributeNode.categories.set(category, categoryNode);
+    attributeNode.amountInCents += transaction.amountInCents;
+    attributeNode.count += 1;
+    attributes.set(attribute, attributeNode);
+    totalExpenseInCents += transaction.amountInCents;
+    totalCount += 1;
   }
 
-  if (totalExpense === 0) {
-    return [];
-  }
-
-  return [...totals.entries()]
-    .map(([category, amountInCents]) => ({
-      category,
-      amountInCents,
-      ratio: (amountInCents / totalExpense) * 100
-    }))
-    .sort((first, second) => second.amountInCents - first.amountInCents);
+  return {
+    totalExpenseInCents,
+    totalCount,
+    attributes: [...attributes.values()].map((attribute) => ({
+      ...attribute,
+      ratio: totalExpenseInCents ? attribute.amountInCents / totalExpenseInCents : 0,
+      categories: [...attribute.categories.values()].map((category) => ({
+        ...category,
+        ratio: attribute.amountInCents ? category.amountInCents / attribute.amountInCents : 0,
+        items: [...category.items.values()].map((item) => ({
+          ...item,
+          ratio: category.amountInCents ? item.amountInCents / category.amountInCents : 0
+        })).sort((first, second) => second.amountInCents - first.amountInCents)
+      })).sort((first, second) => second.amountInCents - first.amountInCents)
+    })).sort((first, second) => second.amountInCents - first.amountInCents)
+  };
 }
 
 function calculateAnomalies(transactionList) {
@@ -789,18 +1515,120 @@ function renderMonthlySummary(summary) {
   monthlySummaryElement.innerHTML = `<div class="monthly-block"><h3>${current.month}（当前月份）</h3>${currentRows}</div><div class="monthly-block"><h3>${previous.month}（上月）</h3>${previousRows}</div><div class="monthly-block"><h3>环比</h3>${changes}</div>${unassignedNotice}`;
 }
 
-function renderCategoryExpenses(categories) {
-  if (categories.length === 0) {
-    categoryExpensesElement.innerHTML = '<p class="category-empty">暂无支出数据</p>';
+function formatRatio(ratio) {
+  return `${(ratio * 100).toFixed(1)}%`;
+}
+
+function createCategoryDrillRow(label, amountInCents, ratio, count, dataset = null) {
+  const row = document.createElement("div");
+  row.className = "category-drill-row";
+  const name = document.createElement(dataset ? "button" : "span");
+  name.textContent = label;
+  if (dataset) {
+    name.type = "button";
+    Object.entries(dataset).forEach(([key, value]) => {
+      name.dataset[key] = value;
+    });
+  }
+  const value = document.createElement("span");
+  value.className = "category-drill-value";
+  value.textContent = `${formatCurrency(amountInCents)} · ${formatRatio(ratio)} · ${count} 笔`;
+  row.append(name, value);
+  return row;
+}
+
+function renderCategoryExpenses(structure) {
+  categoryExpenseSummaryElement.replaceChildren();
+  [["支出", formatCurrency(structure.totalExpenseInCents)], ["交易", `${structure.totalCount} 笔`]]
+    .forEach(([label, value]) => {
+      const entry = document.createElement("span");
+      const strong = document.createElement("strong");
+      strong.textContent = `${label} ${value}`;
+      entry.append(strong);
+      categoryExpenseSummaryElement.append(entry);
+    });
+  categoryExpensesElement.replaceChildren();
+
+  if (structure.totalCount === 0) {
+    const empty = document.createElement("p");
+    empty.className = "category-empty";
+    empty.textContent = "当前统计周期暂无支出数据。";
+    categoryExpensesElement.append(empty);
     return;
   }
 
-  categoryExpensesElement.innerHTML = categories.map((item) => `
-    <div class="category-row">
-      <div class="category-row-header"><span>${escapeHtml(item.category)}</span><span>${formatCurrency(item.amountInCents)} · ${item.ratio.toFixed(1)}%</span></div>
-      <div class="category-bar"><span style="width: ${Math.min(item.ratio, 100)}%"></span></div>
-    </div>
-  `).join("");
+  const list = document.createElement("div");
+  list.className = "category-drill-list";
+  if (categoryDrilldown.level > 0) {
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "range-button category-drill-back";
+    back.dataset.categoryBack = "true";
+    back.textContent = "返回上级";
+    categoryExpensesElement.append(back);
+  }
+
+  if (categoryDrilldown.level === 0) {
+    structure.attributes.forEach((attribute) => {
+      list.append(createCategoryDrillRow(
+        attribute.name,
+        attribute.amountInCents,
+        attribute.ratio,
+        attribute.count,
+        { categoryAttribute: attribute.name }
+      ));
+    });
+  } else {
+    const attribute = structure.attributes.find((item) => item.name === categoryDrilldown.attribute);
+    if (!attribute) {
+      categoryDrilldown = { level: 0, attribute: "", category: "" };
+      renderCategoryExpenses(structure);
+      return;
+    }
+
+    if (categoryDrilldown.level === 1) {
+      attribute.categories.forEach((category) => {
+        list.append(createCategoryDrillRow(
+          category.name,
+          category.amountInCents,
+          category.ratio,
+          category.count,
+          { categoryDrillCategory: category.name }
+        ));
+      });
+    } else {
+      const category = attribute.categories.find((item) => item.name === categoryDrilldown.category);
+      if (!category) {
+        categoryDrilldown = { level: 1, attribute: attribute.name, category: "" };
+        renderCategoryExpenses(structure);
+        return;
+      }
+      category.items.forEach((item) => {
+        list.append(createCategoryDrillRow(item.name, item.amountInCents, item.ratio, item.count));
+      });
+    }
+  }
+
+  categoryExpensesElement.append(list);
+}
+
+function renderHistorySummary(filteredTransactions) {
+  const income = calculateTotalIncome(filteredTransactions);
+  const expense = calculateTotalExpense(filteredTransactions);
+  const values = [
+    ["收入", formatCurrency(income)],
+    ["支出", formatCurrency(expense)],
+    ["结余", formatCurrency(income - expense)],
+    ["记录", `${filteredTransactions.length} 笔`]
+  ];
+  historySummaryElement.replaceChildren();
+  values.forEach(([label, value]) => {
+    const entry = document.createElement("span");
+    const strong = document.createElement("strong");
+    strong.textContent = `${label} ${value}`;
+    entry.append(strong);
+    historySummaryElement.append(entry);
+  });
 }
 
 function renderFinancialInsights(insights) {
@@ -891,6 +1719,107 @@ function saveTransactions() {
   }
 }
 
+function isKnownExpenseCategory(category) {
+  return typeof category === "string" && category.trim() !== "" &&
+    category === category.trim() && !INCOME_CATEGORIES.has(category);
+}
+
+function validateExpenseItemsData(data) {
+  if (!data || typeof data !== "object" || data.version !== 1 || !Array.isArray(data.items)) {
+    return { ok: false, items: [] };
+  }
+
+  const ids = new Set();
+  const names = new Set();
+  for (const item of data.items) {
+    if (!item || typeof item.id !== "string" || !item.id.startsWith("custom:") ||
+      typeof item.category !== "string" || !isKnownExpenseCategory(item.category) ||
+      typeof item.name !== "string" || normalizeExpenseItemName(item.name) !== item.name ||
+      !item.name || item.name.length > 30 || /[\u0000-\u001f<>]/.test(item.name)) {
+      return { ok: false, items: [] };
+    }
+
+    const nameKey = `${item.category}\u0000${item.name.toLocaleLowerCase("zh-CN")}`;
+    if (ids.has(item.id) || names.has(nameKey) ||
+      (PRESET_EXPENSE_ITEMS_BY_CATEGORY[item.category] || []).some(
+        (preset) => preset.name.toLocaleLowerCase("zh-CN") === item.name.toLocaleLowerCase("zh-CN")
+      )) {
+      return { ok: false, items: [] };
+    }
+
+    ids.add(item.id);
+    names.add(nameKey);
+  }
+
+  return { ok: true, items: data.items };
+}
+
+function readStoredExpenseItems() {
+  try {
+    const raw = window.localStorage.getItem(EXPENSE_ITEMS_STORAGE_KEY);
+    if (raw === null) {
+      return { ok: true, raw: null, items: [] };
+    }
+
+    const validation = validateExpenseItemsData(JSON.parse(raw));
+    return validation.ok
+      ? { ok: true, raw, items: validation.items }
+      : { ok: false, raw, items: [] };
+  } catch (error) {
+    return { ok: false, raw: null, items: [] };
+  }
+}
+
+function loadExpenseItems() {
+  const snapshot = readStoredExpenseItems();
+  if (!snapshot.ok) {
+    expenseItemsReadError = true;
+    expenseItemsErrorMessage = "自定义项目目录读取失败或格式异常，已停止目录写入。请先检查目录数据。";
+    return [];
+  }
+  return snapshot.items;
+}
+
+function saveExpenseItems(items) {
+  if (expenseItemsReadError) {
+    return { ok: false, message: expenseItemsErrorMessage };
+  }
+
+  const validation = validateExpenseItemsData({ version: 1, items });
+  if (!validation.ok) {
+    return { ok: false, message: "项目目录校验失败，未保存。" };
+  }
+
+  const currentSnapshot = readStoredExpenseItems();
+  if (!currentSnapshot.ok) {
+    expenseItemsReadError = true;
+    expenseItemsErrorMessage = "自定义项目目录读取失败，已停止目录写入。";
+    return { ok: false, message: expenseItemsErrorMessage };
+  }
+
+  if (JSON.stringify(currentSnapshot.items) !== JSON.stringify(customExpenseItems)) {
+    expenseItemsReadError = true;
+    expenseItemsErrorMessage = "项目目录已在其他位置发生变化，已阻止覆盖；请重新载入页面后重试。";
+    return { ok: false, message: expenseItemsErrorMessage };
+  }
+
+  try {
+    const serialized = JSON.stringify({ version: 1, items: validation.items });
+    window.localStorage.setItem(EXPENSE_ITEMS_STORAGE_KEY, serialized);
+    const verification = readStoredExpenseItems();
+
+    if (!verification.ok || verification.raw !== serialized) {
+      expenseItemsReadError = true;
+      expenseItemsErrorMessage = "项目目录写入后验证失败；项目不会加入可选列表。";
+      return { ok: false, message: expenseItemsErrorMessage };
+    }
+
+    return { ok: true, items: verification.items };
+  } catch (error) {
+    return { ok: false, message: "项目目录保存失败，请检查浏览器存储空间；未将项目加入可选列表。" };
+  }
+}
+
 function isValidStoredTransaction(transaction) {
   return Boolean(
     transaction &&
@@ -927,6 +1856,8 @@ function escapeHtml(value) {
 function clearValidationMessages() {
   amountError.textContent = "";
   categoryError.textContent = "";
+  expenseItemError.textContent = "";
+  expenseItemError.classList.remove("success");
   transactionDateError.textContent = "";
   formMessage.textContent = "";
   formMessage.classList.remove("error");
@@ -942,62 +1873,95 @@ function setDataMessage(message, isError) {
   dataMessage.classList.toggle("error", isError);
 }
 
-function exportTransactions() {
-  const snapshot = readStoredTransactions();
+function validateBackupTransactions(transactionList, requireExpenseItemIdType) {
+  if (!Array.isArray(transactionList)) {
+    return { ok: false, message: "备份缺少有效的 transactions 数组。" };
+  }
 
-  if (!snapshot.ok) {
-    setDataMessage("当前数据读取异常，暂无法安全导出，请先检查数据。", true);
+  const ids = new Set();
+  for (const transaction of transactionList) {
+    if (!isValidStoredTransaction(transaction)) {
+      return { ok: false, message: "备份中包含无效交易数据。" };
+    }
+
+    if (ids.has(transaction.id)) {
+      return { ok: false, message: "备份中存在重复交易 ID。" };
+    }
+    ids.add(transaction.id);
+
+    if (requireExpenseItemIdType && Object.prototype.hasOwnProperty.call(transaction, "expenseItemId") &&
+      (typeof transaction.expenseItemId !== "string" || transaction.expenseItemId.length === 0)) {
+      return { ok: false, message: "备份中存在无效的 expenseItemId。" };
+    }
+  }
+
+  return { ok: true, transactions: transactionList };
+}
+
+function countUnrecognizedExpenseItemReferences(transactionList, directoryItems) {
+  const allItems = [
+    ...Object.values(PRESET_EXPENSE_ITEMS_BY_CATEGORY).flat(),
+    ...directoryItems
+  ];
+
+  return transactionList.reduce((count, transaction) => {
+    if (!transaction.expenseItemId) {
+      return count;
+    }
+
+    const displayCategory = transaction.category === "物业水电" ? "居住" : transaction.category;
+    const recognized = allItems.some((item) =>
+      item.id === transaction.expenseItemId &&
+      (item.category === transaction.category || item.category === displayCategory)
+    );
+    return count + (recognized ? 0 : 1);
+  }, 0);
+}
+
+function exportTransactions() {
+  const transactionSnapshot = readStoredTransactions();
+  const itemSnapshot = readStoredExpenseItems();
+
+  if (!transactionSnapshot.ok) {
+    setDataMessage("交易数据读取异常，已中止导出。", true);
+    return;
+  }
+
+  if (!itemSnapshot.ok) {
+    setDataMessage("自定义项目目录读取或校验失败，已中止导出。", true);
+    return;
+  }
+
+  const transactionValidation = validateBackupTransactions(transactionSnapshot.transactions, true);
+  const itemValidation = validateExpenseItemsData({ version: 1, items: itemSnapshot.items });
+  if (!transactionValidation.ok || !itemValidation.ok) {
+    setDataMessage(transactionValidation.message || "自定义项目目录校验失败，已中止导出。", true);
     return;
   }
 
   const backup = {
-    backupVersion: "1.0",
-    appVersion: "1.3",
+    backupVersion: "2.0",
+    appVersion: "1.7",
     backupCreatedAt: new Date().toISOString(),
     storageKey: STORAGE_KEY,
-    transactions: snapshot.transactions
+    expenseItemsStorageKey: EXPENSE_ITEMS_STORAGE_KEY,
+    transactions: transactionSnapshot.transactions,
+    expenseItems: { version: 1, items: itemSnapshot.items }
   };
 
-  const fileName = `personal-finance-backup-${formatFileTimestamp(new Date())}.json`;
-  const downloadCreated = downloadJsonFile(backup, fileName);
-
-  setDataMessage(
-    downloadCreated ? `备份已导出：${fileName}` : "备份导出失败，请重试。",
-    !downloadCreated
-  );
-}
-
-async function handleBackupFileSelection(event) {
-  const file = event.target.files[0];
-
-  if (!file) {
+  const backupValidation = validateBackupData(backup);
+  if (!backupValidation.ok) {
+    setDataMessage("完整备份封装校验失败，未生成下载文件。", true);
     return;
   }
 
-  hideImportPreview();
+  const fileName = `personal-finance-snapshot-export-only-${formatFileTimestamp(new Date())}.json`;
+  const downloadCreated = downloadJsonFile(backup, fileName);
 
-  try {
-    const text = await file.text();
-    const parsedData = JSON.parse(text);
-    const validation = validateBackupData(parsedData);
-
-    if (!validation.ok) {
-      setDataMessage(validation.message, true);
-      return;
-    }
-
-    pendingImport = {
-      fileName: file.name,
-      backup: parsedData,
-      transactions: validation.transactions,
-      summary: calculateSummary(validation.transactions)
-    };
-    showImportPreview();
-  } catch (error) {
-    setDataMessage("备份文件不是有效的 JSON 文件。", true);
-  } finally {
-    backupFileInput.value = "";
-  }
+  setDataMessage(
+    downloadCreated ? `交易及自定义项目数据快照已导出：${fileName}（尚未验证恢复）` : "数据快照下载失败；未能确认文件已生成。",
+    !downloadCreated
+  );
 }
 
 function validateBackupData(data) {
@@ -1005,33 +1969,45 @@ function validateBackupData(data) {
     return { ok: false, message: "备份文件格式错误。" };
   }
 
-  if (data.backupVersion !== undefined && data.backupVersion !== "1.0") {
-    return { ok: false, message: "备份文件不是当前环境生成的有效备份。" };
-  }
-
-  if (data.storageKey !== undefined && data.storageKey !== STORAGE_KEY) {
-    return { ok: false, message: "备份文件不是当前环境生成的有效备份。" };
-  }
-
-  if (!Array.isArray(data.transactions)) {
-    return { ok: false, message: "备份文件缺少有效的 transactions 数组。" };
-  }
-
-  const ids = new Set();
-
-  for (const transaction of data.transactions) {
-    if (!isValidStoredTransaction(transaction)) {
-      return { ok: false, message: "备份文件中包含无效交易数据。" };
+  const version = data.backupVersion === undefined ? "1.0" : data.backupVersion;
+  if (version === "1.0") {
+    if (data.storageKey !== undefined && data.storageKey !== STORAGE_KEY) {
+      return { ok: false, message: "备份文件不是当前环境生成的有效备份。" };
     }
 
-    if (ids.has(transaction.id)) {
-      return { ok: false, message: "备份文件中存在重复交易 ID。" };
-    }
-
-    ids.add(transaction.id);
+    const transactionValidation = validateBackupTransactions(data.transactions, false);
+    return transactionValidation.ok
+      ? { ok: true, version: "1.0", transactions: transactionValidation.transactions, expenseItems: null }
+      : transactionValidation;
   }
 
-  return { ok: true, transactions: data.transactions };
+  if (version !== "2.0" || data.storageKey !== STORAGE_KEY ||
+    data.expenseItemsStorageKey !== EXPENSE_ITEMS_STORAGE_KEY ||
+    data.appVersion !== "1.7" || typeof data.backupCreatedAt !== "string" ||
+    !Number.isFinite(Date.parse(data.backupCreatedAt))) {
+    return { ok: false, message: "V2.0 备份版本或环境存储键不匹配。" };
+  }
+
+  const transactionValidation = validateBackupTransactions(data.transactions, true);
+  if (!transactionValidation.ok) {
+    return transactionValidation;
+  }
+
+  const itemValidation = validateExpenseItemsData(data.expenseItems);
+  if (!itemValidation.ok) {
+    return { ok: false, message: "V2.0 备份中的自定义项目目录格式或内容无效。" };
+  }
+
+  return {
+    ok: true,
+    version: "2.0",
+    transactions: transactionValidation.transactions,
+    expenseItems: { version: 1, items: itemValidation.items },
+    unrecognizedReferences: countUnrecognizedExpenseItemReferences(
+      transactionValidation.transactions,
+      itemValidation.items
+    )
+  };
 }
 
 function calculateSummary(transactionList) {
@@ -1046,137 +2022,6 @@ function calculateSummary(transactionList) {
     },
     { income: 0, expense: 0 }
   );
-}
-
-function showImportPreview() {
-  const { backup, transactions: importedTransactions, summary } = pendingImport;
-  const currentSnapshot = readStoredTransactions();
-
-  if (!currentSnapshot.ok) {
-    setDataMessage("当前数据读取异常，暂无法恢复，请先检查数据。", true);
-    pendingImport = null;
-    return;
-  }
-
-  previewDetails.innerHTML = [
-    ["备份文件", pendingImport.fileName],
-    ["备份版本", backup.backupVersion],
-    ["备份时间", formatDate(backup.backupCreatedAt)],
-    ["备份记录", `${importedTransactions.length} 条`],
-    ["备份收入", formatCurrency(summary.income)],
-    ["备份支出", formatCurrency(summary.expense)],
-    ["备份余额", formatCurrency(summary.income - summary.expense)],
-    ["当前数据", `${currentSnapshot.transactions.length} 条`],
-    ["导入后数据", `${importedTransactions.length} 条`]
-  ].map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join("");
-
-  importPreview.hidden = false;
-  setDataMessage("备份文件校验通过，请确认是否恢复。", false);
-}
-
-function hideImportPreview() {
-  pendingImport = null;
-  importPreview.hidden = true;
-  previewDetails.replaceChildren();
-}
-
-function createSafetyBackup(transactionsToBackup) {
-  const backup = {
-    backupVersion: "1.0",
-    appVersion: "1.3",
-    backupCreatedAt: new Date().toISOString(),
-    storageKey: STORAGE_KEY,
-    transactions: transactionsToBackup
-  };
-
-  return downloadJsonFile(
-    backup,
-    `personal-finance-safety-backup-${formatFileTimestamp(new Date())}.json`
-  );
-}
-
-function restoreTransactions() {
-  if (!pendingImport || storageReadError) {
-    setDataMessage("当前没有可恢复的有效备份。", true);
-    return;
-  }
-
-  confirmImportButton.disabled = true;
-  const originalSnapshot = readStoredTransactions();
-
-  if (!originalSnapshot.ok) {
-    setDataMessage("当前数据读取异常，已取消恢复。", true);
-    confirmImportButton.disabled = false;
-    return;
-  }
-
-  if (!createSafetyBackup(originalSnapshot.transactions)) {
-    setDataMessage("恢复前安全备份创建失败，已取消恢复，当前数据未改变。", true);
-    confirmImportButton.disabled = false;
-    return;
-  }
-
-  const importedTransactions = pendingImport.transactions;
-  let restoreWriteAttempted = false;
-
-  try {
-    restoreWriteAttempted = true;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(importedTransactions));
-    const verification = readStoredTransactions();
-
-    if (!verification.ok || !transactionsMatch(verification.transactions, importedTransactions)) {
-      throw new Error("恢复后数据验证失败。");
-    }
-
-    transactions = verification.transactions;
-    storageReadError = false;
-    renderPage();
-    hideImportPreview();
-    setDataMessage("恢复成功。", false);
-  } catch (error) {
-    const rollbackSucceeded = rollbackTransactions(
-      originalSnapshot.raw,
-      restoreWriteAttempted
-    );
-
-    if (rollbackSucceeded) {
-      transactions = originalSnapshot.transactions;
-      renderPage();
-      setDataMessage("恢复失败，原数据已经恢复，当前数据未改变。", true);
-    } else {
-      setDataMessage("严重错误：恢复失败且原数据回滚失败，请立即停止操作，并使用安全备份文件恢复。", true);
-    }
-  } finally {
-    confirmImportButton.disabled = false;
-  }
-}
-
-function rollbackTransactions(originalRaw, restoreWriteAttempted) {
-  try {
-    if (originalRaw === null) {
-      if (!restoreWriteAttempted) {
-        return false;
-      }
-
-      window.localStorage.removeItem(STORAGE_KEY);
-      return window.localStorage.getItem(STORAGE_KEY) === null;
-    }
-
-    window.localStorage.setItem(STORAGE_KEY, originalRaw);
-    const verification = readStoredTransactions();
-    return verification.ok && verification.raw === originalRaw;
-  } catch (error) {
-    return false;
-  }
-}
-
-function verifyStoredTransactions(expectedTransactions) {
-  const snapshot = readStoredTransactions();
-  return snapshot.ok && transactionsMatch(snapshot.transactions, expectedTransactions);
-}
-
-function transactionsMatch(first, second) {
-  return JSON.stringify(first) === JSON.stringify(second);
 }
 
 function readStoredTransactions() {

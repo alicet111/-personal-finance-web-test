@@ -1,207 +1,262 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="简单、清晰的个人记账网页">
-  <title>个人记账</title>
-  <link rel="stylesheet" href="style.css">
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <meta name="description" content="简单、清晰的个人记账网页">
+ <title>个人记账</title>
+ <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="app-shell">
-    <header class="page-header">
-      <p class="eyebrow">PERSONAL FINANCE</p>
-      <h1>个人记账</h1>
-      <p class="subtitle">记录每一笔收支，随时掌握自己的财务状况。</p>
-      <div class="environment-status" aria-live="polite">
-        <span id="environment-label">正式数据环境</span>
-        <span id="storage-status">正式数据状态：未初始化</span>
-      </div>
-      <button id="quick-add-button" class="quick-add-button" type="button">＋ 记一笔</button>
-    </header>
+ <main class="app-shell">
+  <p style="padding:12px;background:#fff2cc;color:#523d00;font-weight:700">STEP 2C 发布候选版（未验收）：可按网址区分存储环境；仅开放数据快照导出，导入恢复禁用。请勿发布或录入真实数据。</p>
+ <header class="page-header">
+ <p class="eyebrow">PERSONAL FINANCE</p>
+ <h1>个人记账</h1>
+ <p class="subtitle">记录每一笔收支，随时掌握自己的财务状况。</p>
+ <div class="environment-status" aria-live="polite">
+ <span id="environment-label">正式数据环境</span>
+ <span id="storage-status">正式数据状态：未初始化</span>
+ </div>
+ <button id="quick-add-button" class="quick-add-button" type="button">＋ 记一笔</button>
+ </header>
 
-    <section class="summary-grid" aria-label="财务概览">
-      <article class="summary-card income-card">
-        <span class="summary-label">总收入</span>
-        <strong id="total-income">¥0.00</strong>
-      </article>
-      <article class="summary-card expense-card">
-        <span class="summary-label">总支出</span>
-        <strong id="total-expense">¥0.00</strong>
-      </article>
-      <article class="summary-card balance-card">
-        <span class="summary-label">当前余额</span>
-        <strong id="current-balance">¥0.00</strong>
-      </article>
-      <article class="summary-card surplus-card">
-        <span class="summary-label">累计结余</span>
-        <strong id="total-surplus">¥0.00</strong>
-      </article>
-      <article class="summary-card count-card">
-        <span class="summary-label">交易笔数</span>
-        <strong id="transaction-count">0 笔</strong>
-      </article>
-      <article class="summary-card savings-card">
-        <span class="summary-label">储蓄率</span>
-        <strong id="savings-rate">暂无收入数据</strong>
-      </article>
-    </section>
+ <section class="summary-grid" aria-label="财务概览">
+ <article class="summary-card income-card">
+ <span class="summary-label">总收入</span>
+ <strong id="total-income">¥0.00</strong>
+ </article>
+ <article class="summary-card expense-card">
+ <span class="summary-label">总支出</span>
+ <strong id="total-expense">¥0.00</strong>
+ </article>
+ <article class="summary-card balance-card">
+ <span class="summary-label">当前余额</span>
+ <strong id="current-balance">¥0.00</strong>
+ </article>
+ <article class="summary-card surplus-card">
+ <span class="summary-label">累计结余</span>
+ <strong id="total-surplus">¥0.00</strong>
+ </article>
+ <article class="summary-card count-card">
+ <span class="summary-label">交易笔数</span>
+ <strong id="transaction-count">0 笔</strong>
+ </article>
+ <article class="summary-card savings-card">
+ <span class="summary-label">储蓄率</span>
+ <strong id="savings-rate">暂无收入数据</strong>
+ </article>
+ </section>
 
-    <section class="analytics-grid" aria-label="财务统计与分析">
-      <section class="panel trend-panel" aria-labelledby="trend-title">
-        <div class="section-heading analytics-heading">
-          <div>
-            <p class="section-kicker">TRENDS</p>
-            <h2 id="trend-title">趋势分析</h2>
-          </div>
-          <div id="range-controls" class="range-controls" role="group" aria-label="趋势时间范围">
-            <button class="range-button active" type="button" data-range="30d">近30天</button>
-            <button class="range-button" type="button" data-range="90d">近90天</button>
-            <button class="range-button" type="button" data-range="12m">近12个月</button>
-          </div>
-        </div>
-        <div id="trend-chart" class="trend-chart" aria-live="polite"></div>
-      </section>
+ <section class="analytics-grid" aria-label="财务统计与分析">
+ <section class="panel category-panel" aria-labelledby="category-title">
+ <div class="section-heading">
+ <p class="section-kicker">SPENDING MIX</p>
+ <h2 id="category-title">支出结构</h2>
+ </div>
+ <div class="analysis-controls">
+ <label for="category-period">统计周期</label>
+ <select id="category-period">
+ <option value="month">本月</option>
+ <option value="previous-month">上月</option>
+ <option value="three-months">近3个月</option>
+ <option value="year">本年</option>
+ <option value="all">全部</option>
+ </select>
+ </div>
+ <div id="category-expense-summary" class="category-expense-summary" aria-live="polite"></div>
+ <div id="category-expenses" class="category-expenses" aria-live="polite"></div>
+ </section>
 
-      <section class="panel monthly-panel" aria-labelledby="monthly-title">
-        <div class="section-heading">
-          <p class="section-kicker">MONTHLY</p>
-          <h2 id="monthly-title">月度分析</h2>
-        </div>
-        <div id="monthly-summary" class="monthly-summary" aria-live="polite"></div>
-      </section>
+ <section class="panel insight-panel" aria-labelledby="insight-title">
+ <div class="section-heading">
+ <p class="section-kicker">INSIGHTS</p>
+ <h2 id="insight-title">财务提示</h2>
+ </div>
+ <div id="financial-insights" class="financial-insights" aria-live="polite"></div>
+ </section>
 
-      <section class="panel category-panel" aria-labelledby="category-title">
-        <div class="section-heading">
-          <p class="section-kicker">SPENDING MIX</p>
-          <h2 id="category-title">支出结构</h2>
-        </div>
-        <div id="category-expenses" class="category-expenses" aria-live="polite"></div>
-      </section>
+ <section class="panel monthly-panel" aria-labelledby="monthly-title">
+ <div class="section-heading">
+ <p class="section-kicker">MONTHLY</p>
+ <h2 id="monthly-title">月度分析</h2>
+ </div>
+ <div id="monthly-summary" class="monthly-summary" aria-live="polite"></div>
+ </section>
 
-      <section class="panel insight-panel" aria-labelledby="insight-title">
-        <div class="section-heading">
-          <p class="section-kicker">INSIGHTS</p>
-          <h2 id="insight-title">财务提示</h2>
-        </div>
-        <div id="financial-insights" class="financial-insights" aria-live="polite"></div>
-      </section>
-    </section>
+ <section class="panel trend-panel" aria-labelledby="trend-title">
+ <div class="section-heading analytics-heading">
+ <div>
+ <p class="section-kicker">TRENDS</p>
+ <h2 id="trend-title">趋势分析</h2>
+ </div>
+ <div id="range-controls" class="range-controls" role="group" aria-label="趋势时间范围">
+ <button class="range-button active" type="button" data-range="30d">近30天</button>
+ <button class="range-button" type="button" data-range="90d">近90天</button>
+ <button class="range-button" type="button" data-range="12m">近12个月</button>
+ </div>
+ </div>
+ <div id="trend-chart" class="trend-chart" aria-live="polite"></div>
+ </section>
+ </section>
 
-    <section class="panel data-panel" aria-labelledby="data-title">
-      <div class="section-heading">
-        <p class="section-kicker">DATA CARE</p>
-        <h2 id="data-title">数据管理</h2>
-      </div>
-      <div class="data-actions">
-        <button id="export-button" class="secondary-button" type="button">导出备份</button>
-        <button id="import-button" class="secondary-button" type="button">导入恢复</button>
-        <input id="backup-file-input" type="file" accept=".json,application/json" hidden>
-      </div>
-      <p id="data-message" class="form-message" role="status" aria-live="polite"></p>
-      <section id="import-preview" class="import-preview" hidden aria-labelledby="preview-title">
-        <h3 id="preview-title">恢复预览</h3>
-        <dl id="preview-details" class="preview-details"></dl>
-        <p class="warning-message">恢复后，当前数据将被备份数据替换。</p>
-        <div class="preview-actions">
-          <button id="cancel-import-button" class="secondary-button" type="button">取消</button>
-          <button id="confirm-import-button" class="primary-button" type="button">确认恢复</button>
-        </div>
-      </section>
-    </section>
+ <div class="content-grid">
+ <section id="entry-panel" class="panel form-panel" aria-labelledby="form-title">
+ <div class="section-heading">
+ <p class="section-kicker">NEW ENTRY</p>
+ <h2 id="form-title">添加交易</h2>
+ <p id="editing-status" class="editing-status" hidden>当前正在编辑一笔交易</p>
+ </div>
 
-    <div class="content-grid">
-      <section id="entry-panel" class="panel form-panel" aria-labelledby="form-title">
-        <div class="section-heading">
-          <p class="section-kicker">NEW ENTRY</p>
-          <h2 id="form-title">添加交易</h2>
-          <p id="editing-status" class="editing-status" hidden>当前正在编辑一笔交易</p>
-        </div>
+ <form id="transaction-form" novalidate>
+ <fieldset class="type-fieldset">
+ <legend>交易类型</legend>
+ <div class="type-options">
+ <label class="type-option income-option">
+ <input type="radio" name="type" value="income" checked>
+ <span>收入</span>
+ </label>
+ <label class="type-option expense-option">
+ <input type="radio" name="type" value="expense">
+ <span>支出</span>
+ </label>
+ </div>
+ </fieldset>
 
-        <form id="transaction-form" novalidate>
-          <fieldset class="type-fieldset">
-            <legend>交易类型</legend>
-            <div class="type-options">
-              <label class="type-option income-option">
-                <input type="radio" name="type" value="income" checked>
-                <span>收入</span>
-              </label>
-              <label class="type-option expense-option">
-                <input type="radio" name="type" value="expense">
-                <span>支出</span>
-              </label>
-            </div>
-          </fieldset>
+ <div class="form-row">
+ <div class="form-control">
+ <label for="amount">金额</label>
+ <div class="amount-input">
+ <span aria-hidden="true">¥</span>
+ <input id="amount" name="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" required>
+ </div>
+ <small class="field-error" id="amount-error" role="alert"></small>
+ </div>
+ <div class="form-control">
+ <label for="category">分类</label>
+ <select id="category" name="category" required>
+ <option value="">请选择分类</option>
+ <optgroup label="收入分类" data-category-type="income">
+ <option value="工资">工资</option>
+ <option value="奖金">奖金</option>
+ </optgroup>
+ <optgroup label="支出分类" data-category-type="expense">
+ <option value="居住">居住</option>
+ <option value="餐饮">餐饮</option>
+ <option value="交通">交通</option>
+ <option value="购物">购物</option>
+ <option value="娱乐">娱乐</option>
+ <option value="医疗">医疗</option>
+ <option value="健康">健康</option>
+ <option value="其他">其他</option>
+ </optgroup>
+ <optgroup id="legacy-category-options" label="历史分类" hidden></optgroup>
+ </select>
+ <p id="spending-attribute" class="spending-attribute" aria-live="polite" hidden></p>
+ <div id="category-shortcuts" class="category-shortcuts" role="group" aria-label="常用分类">
+ <button type="button" class="category-shortcut" data-category="餐饮">餐饮</button>
+ <button type="button" class="category-shortcut" data-category="交通">交通</button>
+ <button type="button" class="category-shortcut" data-category="购物">购物</button>
+ <button type="button" class="category-shortcut" data-category="居住">居住</button>
+ <button type="button" class="category-shortcut" data-category="娱乐">娱乐</button>
+ <button type="button" class="category-shortcut" data-category="医疗">医疗</button>
+ <button type="button" class="category-shortcut" data-category="健康">健康</button>
+ <button type="button" class="category-shortcut" data-category="其他">其他</button>
+ </div>
+ <small class="field-error" id="category-error" role="alert"></small>
+ </div>
+ </div>
 
-          <div class="form-row">
-            <div class="form-control">
-              <label for="amount">金额</label>
-              <div class="amount-input">
-                <span aria-hidden="true">¥</span>
-                <input id="amount" name="amount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off" required>
-              </div>
-              <small class="field-error" id="amount-error" role="alert"></small>
-            </div>
-            <div class="form-control">
-              <label for="category">分类</label>
-              <select id="category" name="category" required>
-                <option value="">请选择分类</option>
-                <option value="工资">工资</option>
-                <option value="奖金">奖金</option>
-                <option value="餐饮">餐饮</option>
-                <option value="交通">交通</option>
-                <option value="购物">购物</option>
-                <option value="居住">居住</option>
-                <option value="娱乐">娱乐</option>
-                <option value="医疗">医疗</option>
-                <option value="其他">其他</option>
-              </select>
-              <div id="category-shortcuts" class="category-shortcuts" role="group" aria-label="常用分类">
-                <button type="button" class="category-shortcut" data-category="餐饮">餐饮</button>
-                <button type="button" class="category-shortcut" data-category="交通">交通</button>
-                <button type="button" class="category-shortcut" data-category="购物">购物</button>
-                <button type="button" class="category-shortcut" data-category="居住">居住</button>
-                <button type="button" class="category-shortcut" data-category="娱乐">娱乐</button>
-                <button type="button" class="category-shortcut" data-category="医疗">医疗</button>
-                <button type="button" class="category-shortcut" data-category="其他">其他</button>
-              </div>
-              <small class="field-error" id="category-error" role="alert"></small>
-            </div>
-          </div>
+ <div id="expense-item-control" class="form-control expense-item-control" hidden>
+ <label for="expense-item">支出项目</label>
+ <div class="expense-item-row">
+ <select id="expense-item" name="expenseItemId" aria-describedby="expense-item-error">
+ <option value="">请选择项目</option>
+ </select>
+ <button id="add-expense-item-button" class="secondary-button" type="button">＋ 新增项目</button>
+ <button id="manage-expense-items-button" class="secondary-button" type="button" aria-expanded="false" aria-controls="expense-item-management">管理项目</button>
+ </div>
+ <small class="field-error" id="expense-item-error" role="alert"></small>
+ <div id="expense-item-management" class="expense-item-management" hidden>
+ <p class="expense-item-management-title">当前分类的自定义项目</p>
+ <ul id="custom-expense-item-list" class="custom-expense-item-list"></ul>
+ </div>
+ <div id="custom-expense-item-form" class="custom-expense-item-form" hidden>
+ <label for="custom-expense-item-name">新项目名称</label>
+ <div class="expense-item-row">
+ <input id="custom-expense-item-name" type="text" maxlength="30" autocomplete="off">
+ <button id="save-custom-expense-item-button" class="primary-button" type="button">保存项目</button>
+ <button id="cancel-custom-expense-item-button" class="secondary-button" type="button">取消</button>
+ </div>
+ <small id="custom-expense-item-error" class="field-error" role="alert"></small>
+ </div>
+ </div>
 
-          <div id="transaction-date-control" class="form-control">
-            <label for="transaction-date">交易日期</label>
-            <input id="transaction-date" name="transactionDate" type="date" required>
-            <small class="field-error" id="transaction-date-error" role="alert"></small>
-          </div>
+ <div id="transaction-date-control" class="form-control">
+ <label for="transaction-date">交易日期</label>
+ <input id="transaction-date" name="transactionDate" type="date" required>
+ <small class="field-error" id="transaction-date-error" role="alert"></small>
+ </div>
 
-          <div class="form-control">
-            <label for="note">备注 <span class="optional">可选</span></label>
-            <input id="note" name="note" type="text" maxlength="100" placeholder="例如：本月工资、午餐" autocomplete="off">
-            <small class="field-error" id="note-error" role="alert"></small>
-          </div>
+ <div class="form-control">
+ <label for="note">备注 <span class="optional">可选</span></label>
+ <input id="note" name="note" type="text" maxlength="100" placeholder="例如：本月工资、午餐" autocomplete="off">
+ <small class="field-error" id="note-error" role="alert"></small>
+ </div>
 
-          <button id="submit-button" class="primary-button" type="submit">添加记录</button>
-          <button id="cancel-edit-button" class="secondary-button" type="button" hidden>取消编辑</button>
-          <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
-        </form>
-      </section>
+ <button id="submit-button" class="primary-button" type="submit">添加记录</button>
+ <button id="cancel-edit-button" class="secondary-button" type="button" hidden>取消编辑</button>
+ <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
+ </form>
+ </section>
 
-      <section class="panel records-panel" aria-labelledby="records-title">
-        <div class="records-heading section-heading">
-          <div>
-            <p class="section-kicker">ACTIVITY</p>
-            <h2 id="records-title">交易记录</h2>
-          </div>
-          <span class="record-count" id="record-count">0 笔</span>
-        </div>
-        <div id="transaction-list" class="transaction-list" aria-live="polite">
-          <p class="empty-state">暂无交易记录</p>
-        </div>
-      </section>
-    </div>
-  </main>
+ <section class="panel records-panel" aria-labelledby="records-title">
+ <div class="records-heading section-heading">
+ <div>
+ <p class="section-kicker">ACTIVITY</p>
+ <h2 id="records-title">交易记录</h2>
+ </div>
+ <span class="record-count" id="record-count">0 笔</span>
+ </div>
+ <div class="history-controls">
+ <div class="history-range-controls" role="group" aria-label="交易记录快捷筛选">
+ <button class="range-button active" type="button" data-history-range="month">本月</button>
+ <button class="range-button" type="button" data-history-range="previous-month">上月</button>
+ <button class="range-button" type="button" data-history-range="all">全部记录</button>
+ </div>
+ <label for="history-month">指定年月</label>
+ <input id="history-month" type="month">
+ </div>
+ <div id="history-summary" class="history-summary" aria-live="polite"></div>
+ <div id="transaction-list" class="transaction-list" aria-live="polite">
+ <p class="empty-state">暂无交易记录</p>
+ </div>
+ </section>
+ </div>
 
-  <script src="script.js"></script>
+ <section class="panel data-panel" aria-labelledby="data-title">
+ <div class="section-heading">
+ <p class="section-kicker">DATA CARE</p>
+ <h2 id="data-title">数据管理</h2>
+ </div>
+ <div class="data-actions">
+ <button id="export-button" title="仅导出数据快照；恢复功能尚未验证" class="secondary-button" type="button">导出备份</button>
+ <button id="import-button" disabled title="STEP 2D 未验收，隔离测试中禁用" class="secondary-button" type="button">导入恢复</button>
+ <input id="backup-file-input" type="file" accept=".json,application/json" hidden>
+ </div>
+ <p id="data-message" class="form-message" role="status" aria-live="polite"></p>
+ <section id="import-preview" class="import-preview" hidden aria-labelledby="preview-title">
+ <h3 id="preview-title">恢复预览</h3>
+ <dl id="preview-details" class="preview-details"></dl>
+ <p id="restore-scope-warning" class="warning-message"></p>
+ <div class="preview-actions">
+ <button id="cancel-import-button" class="secondary-button" type="button">取消</button>
+ <button id="confirm-import-button" disabled title="STEP 2D 未验收，隔离测试中禁用" class="primary-button" type="button">确认恢复</button>
+ </div>
+ </section>
+ </section>
+ </main>
+
+ <script src="script.js"></script>
 </body>
 </html>
